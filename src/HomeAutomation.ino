@@ -3,8 +3,8 @@
 #define BIT_OFFSET 4 //Set where the address line starts
 #define MAX_BITS 4 //Set the number of bits in address line
 #define MAX_ADDRESS int(pow(2, MAX_BITS)) //Calculate the maximum address possible (2 ^ MAX_BITS)
-#define state BIT_OFFSET + MAX_BITS //Set the location of clock generator pin
-#define enable BIT_OFFSET + MAX_BITS + 1 //Set the location of switch toggle pin
+#define state BIT_OFFSET + MAX_BITS //Set the location of switch state pin
+#define enable BIT_OFFSET + MAX_BITS + 1 //Set the location of clock signal pin
 #define DEFAULT_TIMEOUT 1000 //Set the default timeout to wait for ESP to reply
 
 SoftwareSerial espSerial(3, 2); //RX, TX
