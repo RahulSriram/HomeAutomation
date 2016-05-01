@@ -1,4 +1,4 @@
-package com.sprocky.homeswitch;
+package com.rocky.homeautomation;
 
 import org.junit.Test;
 

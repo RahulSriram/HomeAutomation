@@ -5,7 +5,7 @@ android {
     buildToolsVersion "23.0.3"
 
     defaultConfig {
-        applicationId "com.sprocky.homeswitch"
+        applicationId "com.rocky.homeautomation"
         minSdkVersion 16
         targetSdkVersion 23
         versionCode 1
