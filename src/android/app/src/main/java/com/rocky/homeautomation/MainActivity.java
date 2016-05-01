@@ -33,7 +33,7 @@ public class MainActivity extends AppCompatActivity {
                 public void onClick(View view) {
                     Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                     intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-                    intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Speech recognition demo");
+                    intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak now");
                     startActivityForResult(intent, VOICE_RECOGNITION_REQUEST_CODE);
                 }
             });
@@ -58,7 +58,11 @@ public class MainActivity extends AppCompatActivity {
             ArrayList matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
 
             if (textview != null) {
-                textview.setText((CharSequence) matches);
+                String temp = "";
+
+                for(int i = 0; i < matches.size(); i++)
+                    temp += matches.get(i) + " ";
+                textview.setText(temp);
             }
         }
     }
