@@ -1,13 +1,19 @@
 #include<SoftwareSerial.h>
+#include <PS2Keyboard.h>
 
-#define BIT_OFFSET 4 //Set where the address line starts
+#define IRQ_PIN 2 //Keyboard IRQ pin
+#define DATA_PIN 3 //Keyboard data pin
+#define TX_PIN 4 //TX pin (Arduino to ESP)
+#define RX_PIN 5 //RX pin (ESP to Arduino)
+#define BIT_OFFSET 6 //Set where the address line starts
 #define MAX_BITS 4 //Set the number of bits in address line
 #define MAX_ADDRESS int(pow(2, MAX_BITS)) //Calculate the maximum address possible (2 ^ MAX_BITS)
 #define state BIT_OFFSET + MAX_BITS //Set the location of switch state pin
 #define enable BIT_OFFSET + MAX_BITS + 1 //Set the location of clock signal pin
 #define DEFAULT_TIMEOUT 1000 //Set the default timeout to wait for ESP to reply
 
-SoftwareSerial espSerial(3, 2); //RX, TX
+SoftwareSerial espSerial(RX_PIN, TX_PIN);
+PS2Keyboard keyboard;
 
 int address; //Stores address sent by client
 int addressBit[MAX_BITS]; //Stores the location of each bit of address line
@@ -170,9 +176,42 @@ boolean parseCommand(String input) {
   }
 }
 
+String getKeyInput() { //Gets input from keyboard and returns output as a String
+  String input = "";
+  
+  while(true) {
+    if(keyboard.available()) {
+      char c = keyboard.read();
+
+      // check for special keys
+      if (c == PS2_ENTER) {
+        return input;
+      }
+
+      else if (c == PS2_ESC) {
+        return ""; 
+      }
+
+      else if (c == PS2_BACKSPACE) {
+        input = input.substring(0, input.length() - 1);
+      }
+
+      else {
+        // otherwise, just print all normal characters
+        input += c;
+      }
+    }
+  }
+}
+
+void terminal() { //Terminal interface to manage switches
+  Serial.println(getKeyInput());
+}
+
 void setup() {
   Serial.begin(9600);
   espSerial.begin(9600);
+  keyboard.begin(DATA_PIN, IRQ_PIN);
   espSerial.setTimeout(DEFAULT_TIMEOUT);
 
   for(int i = 0; i < MAX_BITS; i++) {
@@ -187,9 +226,13 @@ void setup() {
 }
 
 void loop() {
-  while(espSerial.available()) {
-    if(parseCommand(espSerial.readString())) {
-      processCommand();
-    }
+  if(keyboard.available()) {
+    terminal();
   }
+
+  //while(espSerial.available()) {
+    //if(parseCommand(espSerial.readString())) {
+      //processCommand();
+    //}
+  //}
 }
