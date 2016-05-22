@@ -18,7 +18,7 @@
 #define D5 17 //Set 6th Data pin of LCD
 #define D6 18 //Set 7th Data pin of LCD
 #define D7 19 //Set 8th Data pin of LCD
-#define LCD_WAIT 2000 //Set the wait time for LCD to display messages
+#define LCD_WAIT 1000 //Set the wait time for LCD to display messages
 #define DEFAULT_TIMEOUT 1000 //Set default timeout of ESP serial line
 
 LiquidCrystal lcd(RS, E, D4, D5, D6, D7);
@@ -34,7 +34,11 @@ struct switchClass {
   char name[16]; //Stores the name of the device
 }device[MAX_ADDRESS];
 
-void updateDevice(switchClass device, String data, boolean value) { //Update the value of a device which are of type boolean
+void softwareReset() { //Resets the uC via software
+  asm volatile(" jmp 0");
+}
+
+void updateDevice(switchClass& device, String data, boolean value) { //Update the value of a device which are of type boolean
   int offset = sizeof(int); //Update the device status to Flash memory
   for(int i = 0; i < address; i++) {
     offset += sizeof(switchClass);
@@ -52,7 +56,7 @@ void updateDevice(switchClass device, String data, boolean value) { //Update the
   }
 }
 
-void updateDevice(switchClass device, String data, char value[]) { //Update the value of a device which are of type char array
+void updateDevice(switchClass& device, String data, char value[]) { //Update the value of a device which are of type char array
   int offset = sizeof(int); //Update the device status to Flash memory
   for(int i = 0; i < address; i++) {
     offset += sizeof(switchClass);
@@ -82,13 +86,22 @@ void setAddressBits(int temp) { //Converts decimal to binary and stores in addre
   }
 }
 
-boolean ATCommand(String cmd, String ack, int TIMEOUT) { //Send command 'cmd' to esp8266 and wait for 'ack' string in reply for TIMEOUT milliseconds
+void flushESPSerial() { //Flushes any previous responses in buffer
+  while(espSerial.available()) {
+    espSerial.read();
+  }
+}
+
+boolean ATCommand(String cmd, String ack,int TIMEOUT = 0) { //Send command 'cmd' to esp8266 and wait for 'ack' string in reply for TIMEOUT milliseconds
   String reply;
 
-  flushESPSerial(); //Flush any previous replies in buffer
-  espSerial.setTimeout(TIMEOUT);
   espSerial.print(cmd); //Send command to esp8266 appending \n\r to the end (CR+LF)
   espSerial.print(F("\r\n"));
+
+  while(!espSerial.available()); //Wait for esp8266 to reply
+
+  int currTime = millis(); //Wait for TIMEOUT milliseconds before reading reply
+  while(millis() - currTime < TIMEOUT);
 
   while(espSerial.available()) { //Read reply from esp8266
     reply = espSerial.readString();
@@ -102,8 +115,6 @@ boolean ATCommand(String cmd, String ack, int TIMEOUT) { //Send command 'cmd' to
   Serial.print(reply);
   Serial.println(F("\n############End#"));
 
-  espSerial.setTimeout(DEFAULT_TIMEOUT);
-
   if(reply.indexOf(ack) != -1) { //If proper reply is recieved, return true
     return true;
   }
@@ -113,13 +124,16 @@ boolean ATCommand(String cmd, String ack, int TIMEOUT) { //Send command 'cmd' to
   }
 }
 
-boolean ATCommand(String cmd, String ack, int TIMEOUT, String& reply) { //Send command 'cmd' to esp8266 and wait for 'ack' string in reply for TIMEOUT milliseconds and send reply as reference
-  flushESPSerial(); //Flush any previous replies in buffer
-  espSerial.setTimeout(TIMEOUT);
+boolean ATCommand(String cmd, String ack, String& reply, int TIMEOUT = 0) { //Send command 'cmd' to esp8266 and wait for 'ack' string in reply for TIMEOUT milliseconds and send reply as reference
   espSerial.print(cmd);  //Send command to esp8266 appending \n\r to the end (CR+LF)
   espSerial.print(F("\r\n"));
 
-  while(espSerial.available()) {  //Read reply from esp8266
+  while(!espSerial.available()); //Wait for esp8266 to reply
+
+  int currTime = millis(); //Wait for TIMEOUT milliseconds before reading reply
+  while(millis() - currTime < TIMEOUT);
+
+  while(espSerial.available()) { //Read reply from esp8266
     reply = espSerial.readString();
   }
 
@@ -130,8 +144,6 @@ boolean ATCommand(String cmd, String ack, int TIMEOUT, String& reply) { //Send c
   Serial.print(F("\nreply->"));
   Serial.print(reply);
   Serial.println(F("\n############End#"));
-
-  espSerial.setTimeout(DEFAULT_TIMEOUT);
 
   if(reply.indexOf(ack) != -1) { //If proper reply is recieved, return true
     return true;
@@ -149,22 +161,13 @@ void invertPin(int pin, int n) { //Inverts pin's state n times
   }
 }
 
-void flushESPSerial() { //Flushes any previous replies from esp8266 in buffer
-  while(espSerial.available()) {
-    espSerial.read();
-  }
-}
-
 void initialiseESP() { //Runs each command until proper reply is recieved from esp8266
-  while(!ATCommand(F("AT+RST"), F("Ready"), 3000)) {
-    Serial.println(F("Power Supply not sufficient for esp8266"));
-    while(true);
-  }
-  while(!ATCommand(F("ATE0"), F("OK"), 100));
-  while(!ATCommand(F("AT+GMR"), F("OK"), 100));
-  while(!ATCommand(F("AT+CIPMUX=1"), F("OK"), 100));
-  while(!ATCommand(F("AT+CIPSERVER=1,22"), F("OK"), 100)) {
-    if(ATCommand(F("AT+CIPSERVER=1,22"), F("no change"), 100)) {
+  while(!ATCommand(F("AT+RST"), F("Ready"), 3000));
+  while(!ATCommand(F("ATE0"), F("OK")));
+  while(!ATCommand(F("AT+GMR"), F("OK")));
+  while(!ATCommand(F("AT+CIPMUX=1"), F("OK")));
+  while(!ATCommand(F("AT+CIPSERVER=1,22"), F("OK"))) {
+    if(ATCommand(F("AT+CIPSERVER=1,22"), F("no change"))) {
       break;
     }
   }
@@ -214,8 +217,8 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
 
   else if(input.indexOf(F("Ready")) != -1) {
     Serial.println(F("!!!!!!!!ESP8266 Voltage Fluctuation Reset!!!!!!!!"));
-    while(!ATCommand(F("AT+CIPMUX=1"), F("OK"), 100));
-    while(!ATCommand(F("AT+CIPSERVER=1,22"), F("OK"), 100));
+    while(!ATCommand(F("AT+CIPMUX=1"), F("OK")));
+    while(!ATCommand(F("AT+CIPSERVER=1,22"), F("OK")));
     return false;
   }
 
@@ -239,14 +242,14 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
           temp += String(replyTo);
           if(device[address].status) {  //Replying to client about current switch status
             temp += F(",2");
-            ATCommand(temp, F(">"), 100);
-            ATCommand(F("on"), F("SEND OK"), 600);
+            ATCommand(temp, F(">"));
+            ATCommand(F("on"), F("SEND OK"));
           }
 
           else {
             temp += F(",3");
-            ATCommand(temp, F(">"), 100);
-            ATCommand(F("off"), F("SEND OK"), 900);
+            ATCommand(temp, F(">"));
+            ATCommand(F("off"), F("SEND OK"));
           }
 
           return false;
@@ -256,8 +259,8 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
           temp = F("AT+CIPSEND=");
           temp += String(replyTo);
           temp += F(",2");
-          ATCommand(temp, F(">"), 100);
-          ATCommand(F("na"), F("SEND OK"), 600);
+          ATCommand(temp, F(">"));
+          ATCommand(F("na"), F("SEND OK"));
           return false;
         }
       }
@@ -266,8 +269,8 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
         temp = F("AT+CIPSEND=");
         temp += String(replyTo);
         temp += F(",5");
-        ATCommand(temp, F(">"), 100);
-        ATCommand(F("error"), F("SEND OK"), 1500);
+        ATCommand(temp, F(">"));
+        ATCommand(F("error"), F("SEND OK"));
         return false;
       }
     }
@@ -291,8 +294,8 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
           temp = F("AT+CIPSEND=");
           temp += String(replyTo);
           temp += F(",4");
-          ATCommand(temp, F(">"), 100); //Replying to client that the switch will be turned on
-          ATCommand(F("done"), F("SEND OK"), 1200);
+          ATCommand(temp, F(">")); //Replying to client that the switch will be turned on
+          ATCommand(F("done"), F("SEND OK"));
           return true;
         }
 
@@ -300,8 +303,8 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
           temp = F("AT+CIPSEND=");
           temp += String(replyTo);
           temp += F(",2");
-          ATCommand(temp, F(">"), 100);
-          ATCommand(F("na"), F("SEND OK"), 600);
+          ATCommand(temp, F(">"));
+          ATCommand(F("na"), F("SEND OK"));
           return false;
         }
       }
@@ -310,8 +313,8 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
         temp = F("AT+CIPSEND=");
         temp += String(replyTo);
         temp += F(",5");
-        ATCommand(temp, F(">"), 100);
-        ATCommand(F("error"), F("SEND OK"), 1500);
+        ATCommand(temp, F(">"));
+        ATCommand(F("error"), F("SEND OK"));
         return false;
       }
     }
@@ -324,8 +327,8 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
       temp = F("AT+CIPSEND=");
       temp += String(replyTo);
       temp += F(",5");
-      ATCommand(temp, F(">"), 100);
-      ATCommand(F("error"), F("SEND OK"), 1500);
+      ATCommand(temp, F(">"));
+      ATCommand(F("error"), F("SEND OK"));
       return false;
     }
   }
@@ -347,34 +350,10 @@ void processCommand() { //Process sent command and change values
   Serial.println(F("\'\n\n############End#"));
 }
 
-void displayNetworkData() { //Displays SSID and IP address of the system
-  String temp;
-  temp.reserve(16);
-  lcd.clear();
-  while(!ATCommand(F("AT+CWMODE?"), F("CWMODE:"), 100, temp)); 
-  if(temp.indexOf(F("CWMODE:1")) != -1) {  //If CWMODE is 1 (Station mode)
-    while(!ATCommand(F("AT+CWJAP?"), F("CWJAP:"), 100, temp));
-    temp = temp.substring(temp.indexOf(F("+CWJAP:\"")) + 8);
-    temp = temp.substring(0, temp.lastIndexOf(F("\"")));
-    lcd.print(temp); //Print the SSID of wifi network the ESP8266 is connected to
-  }
- 
-  else if(temp.indexOf(F("CWMODE:2")) != -1) {  //If CWMODE is 2 (AP mode)
-    while(!ATCommand(F("AT+CWSAP?"), F("CWSAP:"), 100, temp));
-    temp = temp.substring(temp.indexOf(F("+CWSAP:\"")) + 8);
-    temp = temp.substring(0, temp.indexOf(F("\"")));
-    lcd.print(temp); //Print the SSID of wifi AP created by ESP8266
-  }
-
-  while(!ATCommand(F("AT+CIFSR"), F("OK"), 100, temp));
-  temp = temp.substring(0, temp.indexOf(F("\n")) - 1);
-  lcd.setCursor(0, 1);
-  lcd.print(temp); //Print the IP address of ESP8266 on the network
-}
-
 String getKeyInput(int charLimit = 0) { //Gets input from keyboard and returns output as a String
-  String input = "";
+  String input = "", displayText;
   input.reserve(32);
+  displayText.reserve(32);
 
   while(true) {
     lcd.setCursor(0, 1);
@@ -383,6 +362,10 @@ String getKeyInput(int charLimit = 0) { //Gets input from keyboard and returns o
 
       // check for special keys
       if (c == PS2_ENTER) {
+        if(input.length() == 0) { //If input doesn't contain anything, then return \n as input
+          input = F("\n");
+        }
+
         Serial.print(F("lcd -> "));
         Serial.println(input);
         return input;
@@ -393,15 +376,35 @@ String getKeyInput(int charLimit = 0) { //Gets input from keyboard and returns o
       }
 
       else if (c == PS2_BACKSPACE) {
-        input = input.substring(0, input.length() - 1);
-        lcd.print(input);
-        lcd.print(F(" "));
+        if(input.length() > 0) { //Delete the last character if length of input is greater than 0
+          input = input.substring(0, input.length() - 1);
+
+          if(input.length() >= 16) { //Scrolling display to the right
+            displayText = input.substring(input.length() - 16);
+          }
+
+          else {
+            displayText = input;
+            displayText += F(" ");
+          }
+
+          lcd.print(displayText);
+        }
       }
 
       else {
         if(charLimit == 0 || input.length() < charLimit) {
           input += c;
-          lcd.print(input);
+
+          if(input.length() > 16) { //Scrolling display to the left
+            displayText = input.substring(input.length() - 16);
+          }
+
+          else {
+            displayText = input;
+          }
+
+          lcd.print(displayText);
         }
       }
     }
@@ -410,14 +413,14 @@ String getKeyInput(int charLimit = 0) { //Gets input from keyboard and returns o
 
 void terminal() { //Terminal interface to manage devices
   String temp;
-  temp.reserve(64);
+  temp.reserve(32);
 
-  while(temp.length() > 0) {
+  do {
     lcd.clear();
-    lcd.print(F(">"));
-    temp = getKeyInput();
+    lcd.print(F("Enter command:"));
+    temp = getKeyInput(32);
 
-    if(temp.indexOf(F("add ")) == 0) {
+    if(temp.indexOf(F("add ")) == 0) { //Command for adding devices to known devices list. ex: 'add 1' makes the device at pin 1 available
       address = temp.substring(4).toInt();
 
       if(address > 0 && address <= MAX_ADDRESS) {
@@ -447,7 +450,8 @@ void terminal() { //Terminal interface to manage devices
           lcd.print(address + 1);
           lcd.print(F(" used."));
           lcd.setCursor(0, 1);
-          lcd.print(F("Use edit instead"));
+          lcd.print(F("Use rename "));
+          lcd.print(address + 1);
           delay(LCD_WAIT);
         }
       }
@@ -462,22 +466,33 @@ void terminal() { //Terminal interface to manage devices
       }
     }
 
-    else if(temp.indexOf(F("edit ")) == 0) {
-      address = temp.substring(5).toInt();
+    else if(temp.indexOf(F("rename ")) == 0) { //Command for renaming known devices. ex: 'rename 1' edits the name of device at pin 1
+      address = temp.substring(7).toInt();
 
       if(address > 0 && address <= MAX_ADDRESS) {
-        lcd.clear();
-        lcd.print(F("Enter name of "));
-        lcd.print(address--);
+        if(device[--address].available) {
+          lcd.clear();
+          lcd.print(F("Enter name of "));
+          lcd.print(address + 1);
 
-        char tempArray[16];
-        getKeyInput(16).toCharArray(tempArray, 16);
+          char tempArray[16];
+          getKeyInput(16).toCharArray(tempArray, 16);
 
-        updateDevice(device[address], F("name"), tempArray);
+          updateDevice(device[address], F("name"), tempArray);
 
-        lcd.clear();
-        lcd.print(F("Done"));
-        delay(LCD_WAIT);
+          lcd.clear();
+          lcd.print(F("Done"));
+          delay(LCD_WAIT);
+        }
+
+        else {
+          lcd.clear();
+          lcd.print(F("Device "));
+          lcd.print(address + 1);
+          lcd.setCursor(0, 1);
+          lcd.print(F("not available"));
+          delay(LCD_WAIT);
+        }
       }
 
       else {
@@ -490,7 +505,7 @@ void terminal() { //Terminal interface to manage devices
       }
     }
 
-    else if(temp.indexOf(F("remove ")) == 0) {
+    else if(temp.indexOf(F("remove ")) == 0) { //Command for removing devices from known devices list. ex: 'remove 1' makes the device at pin 1 unavailable
       address = temp.substring(7).toInt();
 
       if(address > 0 && address <= MAX_ADDRESS) {
@@ -507,9 +522,10 @@ void terminal() { //Terminal interface to manage devices
 
         else {
           lcd.clear();
-          lcd.print(F("Device"));
+          lcd.print(F("Device "));
+          lcd.print(address + 1);
           lcd.setCursor(0, 1);
-          lcd.print(F("not found"));
+          lcd.print(F("not available"));
           delay(LCD_WAIT);
         }
       }
@@ -527,23 +543,27 @@ void terminal() { //Terminal interface to manage devices
     else if(temp.indexOf(F("set ")) == 0) {
       temp = temp.substring(4);
 
-      if(temp.indexOf(F("mode ")) == 0) {
+      if(temp.indexOf(F("mode ")) == 0) { //Command for setting Wifi mode. ex: 'set mode 1' makes the system as WiFi client
         temp = temp.substring(5);
 
         if(temp.equals(F("1"))) {
-          while(!ATCommand(F("AT+CWMODE=1"), F("OK"), 100));
-          lcd.clear();
-          lcd.print(F("Wifi Client"));
-          lcd.setCursor(0, 1);
-          lcd.print(F("mode enabled"));
+          while(!ATCommand(F("AT+CWMODE=1"), F("OK"))) {
+            if(ATCommand(F("AT+CWMODE=1"), F("no change"))) {
+              break;
+            }
+          }
+
+          getWifiCredentials();
         }
 
         else if(temp.equals(F("2"))) {
-          while(!ATCommand(F("AT+CWMODE=2"), F("OK"), 100));
-          lcd.clear();
-          lcd.print(F("Wifi Hotspot"));
-          lcd.setCursor(0, 1);
-          lcd.print(F("mode enabled"));
+          while(!ATCommand(F("AT+CWMODE=2"), F("OK"))) {
+            if(ATCommand(F("AT+CWMODE=2"), F("no change"))) {
+              break;
+            }
+          }
+
+          getWifiCredentials();
         }
 
         else {
@@ -554,74 +574,80 @@ void terminal() { //Terminal interface to manage devices
         delay(LCD_WAIT);
       }
 
-      else if(temp.equals("wifi")) {
-        int mode = 0;
-        while(!ATCommand(F("AT+CWMODE?"), F("CWMODE:"), 100, temp));
-        if(temp.indexOf(F("CWMODE:1")) != -1) {  //If CWMODE is 1 (Station mode)
-          mode = 1;
-          temp = F("AT+CWJAP=\"");
-        }
+      if(temp.indexOf(F("device ")) == 0) { //Command for switching on/off connected devices. ex: 'set device 10 on' switches on device at pin 10
+        temp = temp.substring(7);
 
-        else if(temp.indexOf(F("CWMODE:2")) != -1) {  //If CWMODE is  (AP mode)
-          mode = 2;
-          temp = F("AT+CWSAP=\"");
-        }
+        if(temp.indexOf(F(" ")) != -1) {
+          address = temp.substring(0, temp.indexOf(F(" "))).toInt();
 
-        lcd.clear();
-        lcd.print(F("Enter SSID:"));
-        String s1, s2 = "";
-        s1.reserve(16);
+          if(address > 0 && address <= MAX_ADDRESS) {
+            if(device[--address].available) {
+              temp = temp.substring(temp.indexOf(F(" ")) + 1);
+              setAddressBits(address);
 
-        do { //Validate WiFi SSID presence
-          s1 = getKeyInput();
+              if(temp.equals(F("on"))) {
+                updateDevice(device[address], F("status"), true);
+                processCommand();
+                lcd.clear();
+                lcd.print(F("Device "));
+                lcd.print(address + 1);
+                lcd.setCursor(0, 1);
+                lcd.print(F("switched on"));
+                delay(LCD_WAIT);
+              }
 
-          if(mode == 1) {
-            ATCommand(F("AT+CWLAP"), F("OK"), 10000, s2);
-          }
-        }while(s1.equals("") || s2.indexOf(s1) == -1);
+              else if(temp.equals(F("off"))) {
+                updateDevice(device[address], F("status"), false);
+                processCommand();
+                lcd.clear();
+                lcd.print(F("Device "));
+                lcd.print(address + 1);
+                lcd.setCursor(0, 1);
+                lcd.print(F("switched off"));
+                delay(LCD_WAIT);
+              }
 
-        temp += s1;
-        temp += F("\",\"");
-        lcd.clear();
-        lcd.print(F("Enter password:"));
+              else {
+                lcd.clear();
+                lcd.print(F("Invalid state"));
+                lcd.setCursor(0, 1);
+                lcd.print(F("Valid: on / off"));
+                lcd.print(MAX_ADDRESS);
+                delay(LCD_WAIT);
+              }
+            }
 
-        do { //Validate WiFi password
-          s1 = getKeyInput();
-
-          if(mode == 1) {
-            if(!ATCommand(temp + s1 + F("\""), F("OK"), 8000)) {
-              s1 = "";
+            else {
+              lcd.clear();
+              lcd.print(F("Device "));
+              lcd.print(address + 1);
+              lcd.setCursor(0, 1);
+              lcd.print(F("not available"));
+              delay(LCD_WAIT);
             }
           }
 
-          else if(mode == 2) {
-            if(!ATCommand(temp + s1 + F("\",1,3"), F("OK"), 8000)) {
-              s1 = "";
-            }
+          else {
+            lcd.clear();
+            lcd.print(F("Invalid ID"));
+            lcd.setCursor(0, 1);
+            lcd.print(F("Range: 1 - "));
+            lcd.print(MAX_ADDRESS);
+            delay(LCD_WAIT);
           }
-        }while(s1.equals(""));
-
-        if(mode == 1) {  //If CWMODE is 1 (Station mode)
-          lcd.clear();
-          lcd.print(F("Wifi Client"));
-          lcd.setCursor(0, 1);
-          lcd.print(F("details updated"));
         }
 
-        else if(mode == 2) {  //If CWMODE is 2 (AP mode)
+        else {
           lcd.clear();
-          lcd.print(F("Wifi Hotspot"));
-          lcd.setCursor(0, 1);
-          lcd.print(F("details updated"));
+          lcd.print(F("Error"));
+          delay(LCD_WAIT);
         }
-
-        delay(LCD_WAIT);
       }
     }
 
-    else if(temp.equals(F("reset"))) {
+    else if(temp.equals(F("wipe memory"))) { //Fully wipes the memory and makes all devices unknown, after restart
       lcd.clear();
-      lcd.print(F("Reset? [Y/N]:"));
+      lcd.print(F("Wipe mem? [Y/N]:"));
       temp = getKeyInput(1);
       temp.toLowerCase();
 
@@ -629,15 +655,126 @@ void terminal() { //Terminal interface to manage devices
         char emptyArray[16] = {'\0'};
 
         for(address = 0; address < MAX_ADDRESS; address++) {
+          lcd.clear();
           updateDevice(device[address], F("available"), false);
           updateDevice(device[address], F("status"), false);
           updateDevice(device[address], F("name"), emptyArray);
+          lcd.print(address + 1);
+          delay(50);
         }
+
+        softwareReset();
       }
     }
-  }
+
+    else if(temp.equals(F("reboot"))) { //Restart the system
+      softwareReset();
+    }
+  }while(temp.length() > 0);
 
   displayNetworkData();
+}
+
+void displayNetworkData() { //Displays SSID and IP address of the system
+  String temp;
+  temp.reserve(16);
+  lcd.clear();
+  while(!ATCommand(F("AT+CWMODE?"), F("CWMODE:"), temp));
+  if(temp.indexOf(F("CWMODE:1")) != -1) {  //If CWMODE is 1 (Station mode)
+    while(!ATCommand(F("AT+CWJAP?"), F("CWJAP:"), temp, 2000)) {
+      if(ATCommand(F("AT+CWJAP?"), F("ERROR"))) { //If Wifi could not connect, request user for re-entering credentials
+        getWifiCredentials();
+        lcd.clear();
+      }
+    }
+
+    temp = temp.substring(temp.indexOf(F("+CWJAP:\"")) + 8);
+    temp = temp.substring(0, temp.lastIndexOf(F("\"")));
+    lcd.print(temp); //Print the SSID of wifi network the ESP8266 is connected to
+  }
+ 
+  else if(temp.indexOf(F("CWMODE:2")) != -1) {  //If CWMODE is 2 (AP mode)
+    while(!ATCommand(F("AT+CWSAP?"), F("CWSAP:"), temp));
+    temp = temp.substring(temp.indexOf(F("+CWSAP:\"")) + 8);
+    temp = temp.substring(0, temp.indexOf(F("\"")));
+    lcd.print(temp); //Print the SSID of wifi AP created by ESP8266
+  }
+
+  while(!ATCommand(F("AT+CIFSR"), F("OK"), temp));
+  temp = temp.substring(0, temp.indexOf(F("\n")) - 1);
+  lcd.setCursor(0, 1);
+  lcd.print(temp); //Print the IP address of ESP8266 on the network
+}
+
+void getWifiCredentials() { //Gets the Wifi settings and applies it
+  String cmd;
+  int mode = 0;
+  cmd.reserve(32);
+  while(!ATCommand(F("AT+CWMODE?"), F("CWMODE:"), cmd));
+  if(cmd.indexOf(F("CWMODE:1")) != -1) {  //If CWMODE is 1 (Station mode), use AT+CWJAP
+    mode = 1;
+    cmd = F("AT+CWJAP=\"");
+  }
+
+  else if(cmd.indexOf(F("CWMODE:2")) != -1) {  //If CWMODE is  (AP mode), use AT+CWSAP
+    mode = 2;
+    cmd = F("AT+CWSAP=\"");
+  }
+
+  String input;
+  input.reserve(32);
+
+  do { //Get WiFi SSID
+    lcd.clear();
+    lcd.print(F("Enter SSID:"));
+    input = getKeyInput();
+
+    if(mode == 1) { //Validate WiFi SSID if mode 1
+      if(!ATCommand(F("AT+CWLAP"), input)) {
+        lcd.clear();
+        lcd.print("Error. Try again");
+        input = "";
+        delay(500);
+      }
+    }
+  }while(input.equals(""));
+
+  cmd += input;
+  cmd += F("\",\"");
+
+  do { //Get WiFi password
+    lcd.clear();
+    lcd.print(F("Enter password:"));
+    input = getKeyInput();
+    cmd += input;
+    cmd += F("\"");
+
+    if(mode == 2) {
+      cmd += F(",1,3");
+    }
+
+    if(!ATCommand(cmd, F("OK"))) { //Validate credentials
+      lcd.clear();
+      lcd.print("Error. Try again");
+      cmd = cmd.substring(0, cmd.indexOf(input) - 1);
+      input = "";
+      delay(500);
+    }
+  }while(input.equals(""));
+
+  lcd.clear();
+
+  if(mode == 1) {  //If CWMODE is 1 (Station mode)
+    lcd.print(F("Wifi Client"));
+  }
+
+  else if(mode == 2) {  //If CWMODE is 2 (AP mode)
+    lcd.print(F("Wifi Hotspot"));
+  }
+
+  lcd.setCursor(0, 1);
+  lcd.print(F("details updated"));
+  delay(LCD_WAIT);
 }
 
 void setup() {
@@ -670,7 +807,7 @@ void loop() {
     terminal();
   }
 
-  while(espSerial.available()) {
+  if(espSerial.available()) {
     if(parseCommand(espSerial.readString())) {
       processCommand();
     }
