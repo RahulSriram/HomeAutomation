@@ -1,6 +1,8 @@
 package com.rocky.homeautomation;
 
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.speech.RecognizerIntent;
 import android.support.design.widget.FloatingActionButton;
@@ -41,6 +43,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        SharedPreferences ipDefault = getSharedPreferences("Preferences", Context.MODE_PRIVATE);
+
+        if(ipDefault.getString("ipaddr", null) == null) {
+            SharedPreferences.Editor editor = ipDefault.edit();
+            editor.putString("ipaddr", "10.0.0.25");
+            editor.apply();
+        }
+    }
+
+    @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         // Inflate the menu; this adds items to the action bar if it is present.
         getMenuInflater().inflate(R.menu.menu_main, menu);
@@ -51,19 +65,15 @@ public class MainActivity extends AppCompatActivity {
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
-        TextView textview = (TextView) findViewById(R.id.textview);
-
         if (requestCode == VOICE_RECOGNITION_REQUEST_CODE && resultCode == RESULT_OK) {
             // Fill the list with the strings the recognizer thought the user spoke
             ArrayList matches = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
 
-            if (textview != null) {
-                String temp = "";
+            String temp = "";
 
-                for(int i = 0; i < matches.size(); i++)
-                    temp += matches.get(i) + " ";
-                textview.setText(temp);
-            }
+            for(int i = 0; i < matches.size(); i++)
+                temp += matches.get(i) + " ";
+            Toast.makeText(getApplicationContext(), temp, Toast.LENGTH_LONG).show();
         }
     }
 
