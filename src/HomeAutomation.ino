@@ -10,6 +10,7 @@
 #define BIT_OFFSET 6 //Set where the address line starts
 #define MAX_BITS 4 //Set the number of bits in address line
 #define MAX_ADDRESS int(pow(2, MAX_BITS)) //Calculate the maximum address possible (2 ^ MAX_BITS)
+#define MAX_NAME_LENGTH 16 //Sets the maximum length of a name for a device
 #define state BIT_OFFSET + MAX_BITS //Set the location of switch state pin
 #define enable state + 1 //Set the location of clock signal pin
 #define RS 14 //Set Register Select pin of LCD
@@ -19,6 +20,8 @@
 #define D6 18 //Set 7th Data pin of LCD
 #define D7 19 //Set 8th Data pin of LCD
 #define LCD_WAIT 1000 //Set the wait time for LCD to display messages
+#define LCD_LENGTH 16 //Sets the length of characters the LCD can display in one line
+#define LCD_HEIGHT 2 //Sets the number of lines in LCD
 #define DEFAULT_TIMEOUT 1000 //Set default timeout of ESP serial line
 
 LiquidCrystal lcd(RS, E, D4, D5, D6, D7);
@@ -31,7 +34,7 @@ boolean bitValue[MAX_BITS]; //Stores the address sent by client in bits
 struct switchClass {
   boolean available; //Stores whether a device has been initialised to the switch
   boolean status; //Stores the status of each device
-  char name[16]; //Stores the name of the device
+  char name[MAX_NAME_LENGTH]; //Stores the name of the device
 }device[MAX_ADDRESS];
 
 void softwareReset() { //Resets the uC via software
@@ -65,7 +68,7 @@ void updateDevice(switchClass& device, String data, char value[]) { //Update the
   if(data.equals(F("name"))) {
     offset += sizeof(boolean) * 2;
 
-    for(int i = 0; i < 16; i++, offset += sizeof(char)) {
+    for(int i = 0; i < MAX_NAME_LENGTH; i++, offset += sizeof(char)) {
       device.name[i] = value[i];
       EEPROM.update(offset, device.name[i]);
     }
@@ -379,8 +382,8 @@ String getKeyInput(int charLimit = 0) { //Gets input from keyboard and returns o
         if(input.length() > 0) { //Delete the last character if length of input is greater than 0
           input = input.substring(0, input.length() - 1);
 
-          if(input.length() >= 16) { //Scrolling display to the right
-            displayText = input.substring(input.length() - 16);
+          if(input.length() >= LCD_LENGTH) { //Scrolling display to the right
+            displayText = input.substring(input.length() - LCD_LENGTH);
           }
 
           else {
@@ -396,8 +399,8 @@ String getKeyInput(int charLimit = 0) { //Gets input from keyboard and returns o
         if(charLimit == 0 || input.length() < charLimit) {
           input += c;
 
-          if(input.length() > 16) { //Scrolling display to the left
-            displayText = input.substring(input.length() - 16);
+          if(input.length() > LCD_LENGTH) { //Scrolling display to the left
+            displayText = input.substring(input.length() - LCD_LENGTH);
           }
 
           else {
@@ -429,8 +432,8 @@ void terminal() { //Terminal interface to manage devices
           lcd.print(F("Enter name of "));
           lcd.print(address + 1);
 
-          char tempArray[16];
-          getKeyInput(16).toCharArray(tempArray, 16);
+          char tempArray[MAX_NAME_LENGTH];
+          getKeyInput(MAX_NAME_LENGTH).toCharArray(tempArray, MAX_NAME_LENGTH);
 
           updateDevice(device[address], F("available"), true);
           updateDevice(device[address], F("status"), false);
@@ -475,8 +478,8 @@ void terminal() { //Terminal interface to manage devices
           lcd.print(F("Enter name of "));
           lcd.print(address + 1);
 
-          char tempArray[16];
-          getKeyInput(16).toCharArray(tempArray, 16);
+          char tempArray[MAX_NAME_LENGTH];
+          getKeyInput(MAX_NAME_LENGTH).toCharArray(tempArray, MAX_NAME_LENGTH);
 
           updateDevice(device[address], F("name"), tempArray);
 
@@ -652,7 +655,7 @@ void terminal() { //Terminal interface to manage devices
       temp.toLowerCase();
 
       if(temp.equals(F("y"))) {
-        char emptyArray[16] = {'\0'};
+        char emptyArray[MAX_NAME_LENGTH] = {'\0'};
 
         for(address = 0; address < MAX_ADDRESS; address++) {
           lcd.clear();
@@ -781,7 +784,7 @@ void setup() {
   Serial.begin(9600);
   espSerial.begin(9600);
   keyboard.begin(DATA_PIN, IRQ_PIN);
-  lcd.begin(16, 2);
+  lcd.begin(LCD_LENGTH, LCD_HEIGHT);
   lcd.print(F("Home"));
   lcd.setCursor(0, 1);
   lcd.print(F("Automation"));
