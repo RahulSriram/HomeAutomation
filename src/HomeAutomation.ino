@@ -161,8 +161,8 @@ void initialiseESP() { //Runs each command until proper reply is recieved from e
 	while(!ATCommand(F("ATE0"), F("OK")));
 	while(!ATCommand(F("AT+GMR"), F("OK")));
 	while(!ATCommand(F("AT+CIPMUX=1"), F("OK")));
-	while(!ATCommand(F("AT+CIPSERVER=1,22"), F("OK"))) {
-		if(ATCommand(F("AT+CIPSERVER=1,22"), F("no change"))) {
+	while(!ATCommand(F("AT+CIPSERVER=1,2222"), F("OK"))) {
+		if(ATCommand(F("AT+CIPSERVER=1,2222"), F("no change"))) {
 			break;
 		}
 	}
@@ -177,7 +177,7 @@ void initialiseSwitches() { //Initialise all the devices using data stored in EE
 	offset += sizeof(int);
 
 	if(!isRunBefore) {
-		for(address=0; address<MAX_ADDRESS; address++) {
+		for(address = 0; address < MAX_ADDRESS; address++) {
 			device[address].available = false;
 			device[address].status = false;
 			setAddressBits(address);
@@ -307,6 +307,40 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
 				ATCommand(F("error"), F("SEND OK"));
 				return false;
 			}
+		} else if(cmd.indexOf(F("#")) != -1) { //If command was to get a list of available switch IDs
+			int dataLength;
+			String data;
+			data.reserve(32);
+
+			for(int i = 0; i < MAX_ADDRESS; i++) {
+				if(device[i].available) {
+					int t = i + 1;
+					while(t != 0) { //To count number of digits in i
+						dataLength++;
+						t /= 10;
+					}
+					data += String(i + 1);
+					data += F(",");
+					dataLength++; //To include length of comma character
+				}
+			}
+
+			if(dataLength == 0) {
+				data = "na";
+				dataLength = 2;
+			} else {
+				data = data.substring(0, data.length() - 1); //To remove the extra comma at the end of the string added by above for loop
+				dataLength--; //To remove the length of the extra comma
+			}
+
+			temp = F("AT+CIPSEND=");
+			temp += String(replyTo);
+			temp += F(",");
+			temp += String(dataLength);
+			ATCommand(temp, F(">"));
+			ATCommand(data, F("SEND OK"));
+
+			return false;
 		} else if(cmd.indexOf(F("exit")) != -1) { //If client was using telnet, then it prints exit before leaving
 			return false;
 		} else { //If any of the conditions are not met, then inform client and change nothing
