@@ -161,8 +161,8 @@ void initialiseESP() { //Runs each command until proper reply is recieved from e
 	while(!ATCommand(F("ATE0"), F("OK")));
 	while(!ATCommand(F("AT+GMR"), F("OK")));
 	while(!ATCommand(F("AT+CIPMUX=1"), F("OK")));
-	while(!ATCommand(F("AT+CIPSERVER=1,2222"), F("OK"))) {
-		if(ATCommand(F("AT+CIPSERVER=1,2222"), F("no change"))) {
+	while(!ATCommand(F("AT+CIPSERVER=1,80"), F("OK"))) {
+		if(ATCommand(F("AT+CIPSERVER=1,80"), F("no change"))) {
 			break;
 		}
 	}
@@ -212,58 +212,130 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
 		while(!ATCommand(F("AT+CIPSERVER=1,22"), F("OK")));
 		return false;
 	} else { //if this is not a client connection message, then parse the command
-		String cmd;
 		String temp;
 		temp.reserve(16);
 		int commaLocation1 = input.indexOf(F("+IPD,")) + 4; //Client's connection number lies between the first 2 commas (ex: +IPD,0,...)
 		int commaLocation2 = input.indexOf(F(","), commaLocation1);
 		int replyTo = input.substring(commaLocation1 + 1, commaLocation2).toInt(); //Get connection number of client to send reply to
+		int cmdLocation = input.indexOf(F("cmd=")); //Get location of GET variable 'cmd'
 
-		cmd = input.substring(input.indexOf(F(":")) + 1); //Get the command sent by client
+		if(cmdLocation != -1) {
+			String cmd;
+			cmd.reserve(16);
+			cmd = input.substring(cmdLocation + 4); //Get the command sent by client
 
-		if(cmd.indexOf(F("?")) != -1) { //If command was to get the name and current state of a switch
-			int queryLocation = cmd.indexOf(F("?")); //Get location of end of query (ex: 128? is query device 128)
-			address = cmd.substring(0, queryLocation).toInt(); //parsing out address value
+			if(cmd.startsWith(F("get_"))) { //If command was to get the name and current state of a switch (ex: get_128 is query status of device 128)
+				address = cmd.substring(4).toInt(); //parsing out address value
 
-			if((address > 0) && (address <= MAX_ADDRESS)) { //Checking if address is a valid value
-				if(device[--address].available) {
-					String tempName;
-					tempName.reserve(MAX_NAME_LENGTH);
+				if((address > 0) && (address <= MAX_ADDRESS)) { //Checking if address is a valid value
+					if(device[--address].available) {
+						String tempName;
+						tempName.reserve(MAX_NAME_LENGTH);
+						int dataLength = MAX_NAME_LENGTH + 2;
 
-					temp = F("AT+CIPSEND=");
-					temp += String(replyTo);
-					if(device[address].status) { //Replying to client about current switch status
+						temp = F("AT+CIPSEND=");
+						temp += String(replyTo);
+						temp += F(",");
+						temp += String(dataLength);
+						ATCommand(temp, F(">"));
+
 						for (int i = 0; i < MAX_NAME_LENGTH; i++) {
 							tempName += device[address].name;
 						}
 
-						int dataLength = MAX_NAME_LENGTH + 3;
-						temp += F(",");
-						temp += String(dataLength);
-						ATCommand(temp, F(">"));
-						ATCommand(tempName + F(",on"), F("SEND OK"));
+						if(device[address].status) { //Replying to client about current switch status
+							ATCommand(tempName + F(",1"), F("SEND OK"));
+						} else {
+							ATCommand(tempName + F(",0"), F("SEND OK"));
+						}
+
+						return false;
 					} else {
-						for (int i = 0; i < MAX_NAME_LENGTH; i++) {
-							tempName += device[address].name;
-						}
-
-						int dataLength = MAX_NAME_LENGTH + 4;
-						temp += F(",");
-						temp += String(dataLength);
+						temp = F("AT+CIPSEND=");
+						temp += String(replyTo);
+						temp += F(",2");
 						ATCommand(temp, F(">"));
-						ATCommand(tempName + F(",off"), F("SEND OK"));
+						ATCommand(F("na"), F("SEND OK"));
+						return false;
 					}
-
-					return false;
 				} else {
 					temp = F("AT+CIPSEND=");
 					temp += String(replyTo);
-					temp += F(",2");
+					temp += F(",5");
 					ATCommand(temp, F(">"));
-					ATCommand(F("na"), F("SEND OK"));
+					ATCommand(F("error"), F("SEND OK"));
 					return false;
 				}
-			} else {
+			} else if(cmd.startsWith(F("set_"))) { //If command was to set a switch's status (ex: set_128_1 is turn on device 128)
+				address = cmd.substring(4, cmd.lastIndexOf(F("_"))).toInt(); //parsing out address value
+
+				if((address > 0) && (address <= MAX_ADDRESS)) { //Checking if address is a valid value
+					if(device[--address].available) {
+						setAddressBits(address);
+
+						if(cmd.substring(cmd.lastIndexOf(F("_")) + 1).toInt()) {
+							updateDevice(device[address], F("status"), true);
+						} else {
+							updateDevice(device[address], F("status"), false);
+						}
+
+						temp = F("AT+CIPSEND=");
+						temp += String(replyTo);
+						temp += F(",4");
+						ATCommand(temp, F(">")); //Replying to client that the switch will be turned on
+						ATCommand(F("done"), F("SEND OK"));
+						return true;
+					} else {
+						temp = F("AT+CIPSEND=");
+						temp += String(replyTo);
+						temp += F(",2");
+						ATCommand(temp, F(">"));
+						ATCommand(F("na"), F("SEND OK"));
+						return false;
+					}
+				} else {
+					temp = F("AT+CIPSEND=");
+					temp += String(replyTo);
+					temp += F(",5");
+					ATCommand(temp, F(">"));
+					ATCommand(F("error"), F("SEND OK"));
+					return false;
+				}
+			} else if(cmd.startsWith(F("list"))) { //If command was to get a list of available switch IDs
+				int dataLength;
+				String data;
+				data.reserve(32);
+
+				for(int i = 0; i < MAX_ADDRESS; i++) {
+					if(device[i].available) {
+						int t = i + 1;
+						while(t != 0) { //To count number of digits in i
+							dataLength++;
+							t /= 10;
+						}
+						data += String(i + 1);
+						data += F(",");
+						dataLength++; //To include length of comma character
+					}
+				}
+
+				if(dataLength == 0) {
+					data = "na";
+					dataLength = 2;
+				} else {
+					data = data.substring(0, data.length() - 1); //To remove the extra comma at the end of the string added by above for loop
+					dataLength--; //To remove the length of the extra comma
+				}
+
+				temp = F("AT+CIPSEND=");
+				temp += String(replyTo);
+				temp += F(",");
+				temp += String(dataLength);
+				ATCommand(temp, F(">"));
+				ATCommand(data, F("SEND OK"));
+
+				return false;
+			} else { //If any of the conditions are not met, then inform client and change nothing
 				temp = F("AT+CIPSEND=");
 				temp += String(replyTo);
 				temp += F(",5");
@@ -271,84 +343,7 @@ boolean parseCommand(String input) { //Parse and validate the command sent by cl
 				ATCommand(F("error"), F("SEND OK"));
 				return false;
 			}
-		} else if(cmd.indexOf(F("=")) != -1) { //If command was to set a switch's status
-			int setLocation = cmd.indexOf(F("=")); //Get location of address and signal state value separator (ex: 128=1 is turn on device 128)
-			address = cmd.substring(0, setLocation).toInt(); //parsing out address value
-
-			if((address > 0) && (address <= MAX_ADDRESS)) { //Checking if address is a valid value
-				if(device[--address].available) {
-					setAddressBits(address);
-
-					if(cmd.substring(setLocation + 1, setLocation + 2).toInt()) {
-						updateDevice(device[address], F("status"), true);
-					} else {
-						updateDevice(device[address], F("status"), false);
-					}
-
-					temp = F("AT+CIPSEND=");
-					temp += String(replyTo);
-					temp += F(",4");
-					ATCommand(temp, F(">")); //Replying to client that the switch will be turned on
-					ATCommand(F("done"), F("SEND OK"));
-					return true;
-				} else {
-					temp = F("AT+CIPSEND=");
-					temp += String(replyTo);
-					temp += F(",2");
-					ATCommand(temp, F(">"));
-					ATCommand(F("na"), F("SEND OK"));
-					return false;
-				}
-			} else {
-				temp = F("AT+CIPSEND=");
-				temp += String(replyTo);
-				temp += F(",5");
-				ATCommand(temp, F(">"));
-				ATCommand(F("error"), F("SEND OK"));
-				return false;
-			}
-		} else if(cmd.indexOf(F("#")) != -1) { //If command was to get a list of available switch IDs
-			int dataLength;
-			String data;
-			data.reserve(32);
-
-			for(int i = 0; i < MAX_ADDRESS; i++) {
-				if(device[i].available) {
-					int t = i + 1;
-					while(t != 0) { //To count number of digits in i
-						dataLength++;
-						t /= 10;
-					}
-					data += String(i + 1);
-					data += F(",");
-					dataLength++; //To include length of comma character
-				}
-			}
-
-			if(dataLength == 0) {
-				data = "na";
-				dataLength = 2;
-			} else {
-				data = data.substring(0, data.length() - 1); //To remove the extra comma at the end of the string added by above for loop
-				dataLength--; //To remove the length of the extra comma
-			}
-
-			temp = F("AT+CIPSEND=");
-			temp += String(replyTo);
-			temp += F(",");
-			temp += String(dataLength);
-			ATCommand(temp, F(">"));
-			ATCommand(data, F("SEND OK"));
-
-			return false;
-		} else if(cmd.indexOf(F("exit")) != -1) { //If client was using telnet, then it prints exit before leaving
-			return false;
-		} else { //If any of the conditions are not met, then inform client and change nothing
-			temp = F("AT+CIPSEND=");
-			temp += String(replyTo);
-			temp += F(",5");
-			ATCommand(temp, F(">"));
-			ATCommand(F("error"), F("SEND OK"));
+		} else { //Ignore HTTP request without required GET variable
 			return false;
 		}
 	}
