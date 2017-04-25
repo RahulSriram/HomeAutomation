@@ -161,8 +161,8 @@ void initialiseESP() { //Runs each command until proper reply is recieved from e
 	while(!ATCommand(F("ATE0"), F("OK")));
 	while(!ATCommand(F("AT+GMR"), F("OK")));
 	while(!ATCommand(F("AT+CIPMUX=1"), F("OK")));
-	while(!ATCommand(F("AT+CIPSERVER=1,80"), F("OK"))) {
-		if(ATCommand(F("AT+CIPSERVER=1,80"), F("no change"))) {
+	while(!ATCommand(F("AT+CIPSERVER=1,8000"), F("OK"))) {
+		if(ATCommand(F("AT+CIPSERVER=1,8000"), F("no change"))) {
 			break;
 		}
 	}
