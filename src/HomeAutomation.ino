@@ -5,10 +5,8 @@
 
 #define IRQ_PIN 2 //Keyboard IRQ pin
 #define DATA_PIN 3 //Keyboard data pin
-#define TX_PIN 4 //TX pin (Arduino to ESP)
-#define RX_PIN 5 //RX pin (ESP to Arduino)
-#define BIT_OFFSET 6 //Set where the address line starts
-#define MAX_BITS 4 //Set the number of bits in address line
+#define BIT_OFFSET 4 //Set where the address line starts
+#define MAX_BITS 8 //Set the number of bits in address line
 #define MAX_ADDRESS int(pow(2, MAX_BITS)) //Calculate the maximum address possible (2 ^ MAX_BITS)
 #define MAX_NAME_LENGTH 16 //Sets the maximum length of a name for a device
 #define state BIT_OFFSET + MAX_BITS //Set the location of switch state pin
@@ -23,9 +21,15 @@
 #define LCD_LENGTH 16 //Sets the length of characters the LCD can display in one line
 #define LCD_HEIGHT 2 //Sets the number of lines in LCD
 #define DEFAULT_TIMEOUT 1000 //Set default timeout of ESP serial line
+/*
+#define DEBUG_TX 20 //Debug TX pin
+#define DEBUG_RX 21 //Debug RX pin
+*/
 
 LiquidCrystal lcd(RS, E, D4, D5, D6, D7);
-SoftwareSerial espSerial(RX_PIN, TX_PIN);
+#if defined(DEBUG_TX) && defined(DEBUG_RX)
+	SoftwareSerial debugSerial(DEBUG_RX, DEBUG_TX);
+#endif
 PS2Keyboard keyboard;
 
 int address; //Stores address sent by client
@@ -86,34 +90,34 @@ void setAddressBits(int temp) { //Converts decimal to binary and stores in addre
 }
 
 void flushESPSerial() { //Flushes any previous responses in buffer
-	while(espSerial.available()) {
-		espSerial.read();
+	while(Serial.available()) {
+		Serial.read();
 	}
 }
 
 boolean ATCommand(String cmd, String ack,int TIMEOUT = 0) { //Send command 'cmd' to esp8266 and wait for 'ack' string in reply for TIMEOUT milliseconds
 	String reply;
 
-	espSerial.print(cmd); //Send command to esp8266 appending \n\r to the end (CR+LF)
-	espSerial.print(F("\r\n"));
+	Serial.print(cmd); //Send command to esp8266 appending \n\r to the end (CR+LF)
+	Serial.print(F("\r\n"));
 
-	while(!espSerial.available()); //Wait for esp8266 to reply
+	while(!Serial.available()); //Wait for esp8266 to reply
 
 	int currTime = millis(); //Wait for TIMEOUT milliseconds before reading reply
 	while(millis() - currTime < TIMEOUT);
 
-	while(espSerial.available()) { //Read reply from esp8266
-		reply = espSerial.readString();
+	while(Serial.available()) { //Read reply from esp8266
+		reply = Serial.readString();
 	}
-
-	Serial.print(F("\n#Start##########\ncmd->")); //Print to Serial for debugging
-	Serial.print(cmd);
-	Serial.print(F("\nack->"));
-	Serial.print(ack);
-	Serial.print(F("\nreply->"));
-	Serial.print(reply);
-	Serial.println(F("\n############End#"));
-
+	#if defined(DEBUG_TX) && defined(DEBUG_RX)
+		debugSerial.print(F("\n#Start##########\ncmd->")); //Print to Serial for debugging
+		debugSerial.print(cmd);
+		debugSerial.print(F("\nack->"));
+		debugSerial.print(ack);
+		debugSerial.print(F("\nreply->"));
+		debugSerial.print(reply);
+		debugSerial.println(F("\n############End#"));
+	#endif
 	if(reply.indexOf(ack) != -1) { //If proper reply is recieved, return true
 		return true;
 	} else {
@@ -122,26 +126,26 @@ boolean ATCommand(String cmd, String ack,int TIMEOUT = 0) { //Send command 'cmd'
 }
 
 boolean ATCommand(String cmd, String ack, String& reply, int TIMEOUT = 0) { //Send command 'cmd' to esp8266 and wait for 'ack' string in reply for TIMEOUT milliseconds and send reply as reference
-	espSerial.print(cmd); //Send command to esp8266 appending \n\r to the end (CR+LF)
-	espSerial.print(F("\r\n"));
+	Serial.print(cmd); //Send command to esp8266 appending \n\r to the end (CR+LF)
+	Serial.print(F("\r\n"));
 
-	while(!espSerial.available()); //Wait for esp8266 to reply
+	while(!Serial.available()); //Wait for esp8266 to reply
 
 	int currTime = millis(); //Wait for TIMEOUT milliseconds before reading reply
 	while(millis() - currTime < TIMEOUT);
 
-	while(espSerial.available()) { //Read reply from esp8266
-		reply = espSerial.readString();
+	while(Serial.available()) { //Read reply from esp8266
+		reply = Serial.readString();
 	}
-
-	Serial.print(F("\n#Start##########\ncmd->")); //Print to Serial for debugging
-	Serial.print(cmd);
-	Serial.print(F("\nack->"));
-	Serial.print(ack);
-	Serial.print(F("\nreply->"));
-	Serial.print(reply);
-	Serial.println(F("\n############End#"));
-
+	#if defined(DEBUG_TX) && defined(DEBUG_RX)
+		debugSerial.print(F("\n#Start##########\ncmd->")); //Print to Serial for debugging
+		debugSerial.print(cmd);
+		debugSerial.print(F("\nack->"));
+		debugSerial.print(ack);
+		debugSerial.print(F("\nreply->"));
+		debugSerial.print(reply);
+		debugSerial.println(F("\n############End#"));
+	#endif
 	if(reply.indexOf(ack) != -1) { //If proper reply is recieved, return true
 		return true;
 	} else {
@@ -200,14 +204,17 @@ void initialiseSwitches() { //Initialise all the devices using data stored in EE
 }
 
 boolean parseCommand(String input) { //Parse and validate the command sent by client
-	Serial.print(F("****************\nInput-> ")); //Print to Serial for debugging
-	Serial.println(input);
-	Serial.println();
-
+	#if defined(DEBUG_TX) && defined(DEBUG_RX)
+		debugSerial.print(F("****************\nInput-> ")); //Print to Serial for debugging
+		debugSerial.println(input);
+		debugSerial.println();
+	#endif
 	if((input.indexOf(F("Link")) != -1) || (input.indexOf(F("Unlink")) != -1)) { //If client has opened or closed connection, do nothing
 		return false;
 	} else if(input.indexOf(F("Ready")) != -1) {
-		Serial.println(F("!!!!!!!!ESP8266 Voltage Fluctuation Reset!!!!!!!!"));
+		#if defined(DEBUG_TX) && defined(DEBUG_RX)
+			debugSerial.println(F("!!!!!!!!ESP8266 Voltage Fluctuation Reset!!!!!!!!")); //Print to Serial for debugging
+		#endif
 		while(!ATCommand(F("AT+CIPMUX=1"), F("OK")));
 		while(!ATCommand(F("AT+CIPSERVER=1,22"), F("OK")));
 		return false;
@@ -357,12 +364,13 @@ void processCommand() { //Process sent command and change values
 	digitalWrite(state, device[address].status);
 
 	invertPin(enable, 2); //Sends a pulse to clock of D flip-flop at specified address
-
-	Serial.print(F("\n#Start##########\n\n\'")); //Print to Serial for debugging
-	Serial.print(device[address].status);
-	Serial.print(F("\' set to address \'"));
-	Serial.print(address);
-	Serial.println(F("\'\n\n############End#"));
+	#if defined(DEBUG_TX) && defined(DEBUG_RX)
+		debugSerial.print(F("\n#Start##########\n\n\'")); //Print to Serial for debugging
+		debugSerial.print(device[address].status);
+		debugSerial.print(F("\' set to address \'"));
+		debugSerial.print(address);
+		debugSerial.println(F("\'\n\n############End#"));
+	#endif
 }
 
 String getKeyInput(int charLimit = 0) { //Gets input from keyboard and returns output as a String
@@ -380,9 +388,10 @@ String getKeyInput(int charLimit = 0) { //Gets input from keyboard and returns o
 				if(input.length() == 0) { //If input doesn't contain anything, then return \n as input
 					input = F("\n");
 				}
-
-				Serial.print(F("lcd -> "));
-				Serial.println(input);
+				#if defined(DEBUG_TX) && defined(DEBUG_RX)
+					debugSerial.print(F("lcd -> ")); //Print to Serial for debugging
+					debugSerial.println(input);
+				#endif
 				return input;
 			} else if (c == PS2_ESC) {
 				return "";
@@ -743,8 +752,10 @@ void getWifiCredentials() { //Gets the Wifi settings and applies it
 }
 
 void setup() {
-	Serial.begin(9600);
-	espSerial.begin(9600);
+	#if defined(DEBUG_TX) && defined(DEBUG_RX)
+		debugSerial.begin(9600);
+	#endif
+	Serial.begin(115200);
 	keyboard.begin(DATA_PIN, IRQ_PIN);
 	lcd.begin(LCD_LENGTH, LCD_HEIGHT);
 	lcd.print(F("Home"));
@@ -772,8 +783,8 @@ void loop() {
 		terminal();
 	}
 
-	if(espSerial.available()) {
-		if(parseCommand(espSerial.readString())) {
+	if(Serial.available()) {
+		if(parseCommand(Serial.readString())) {
 			processCommand();
 		}
 	}
